@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import ErrorBlock from '../components/ErrorBlock';
 import axios from 'axios';
@@ -10,13 +9,10 @@ function Item() {
   const { id } = useParams();
   const nav = useNavigate();
   const { current, loading, err, loadOne, clearErr } = useApp();
-  const { user } = useAuth();
   const [notFound, setNotFound] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
   const [relatedVulns, setRelatedVulns] = useState([]);
   const [relatedSources, setRelatedSources] = useState([]);
-
-  const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
     if (loadedId !== id) {
@@ -141,16 +137,14 @@ function Item() {
           </div>
         )}
 
-        {isAdmin && (
-          <div className="actions">
-            <Link to={'/change/' + current.id} className="btn edit">
-              Редактировать
-            </Link>
-            <Link to={'/remove/' + current.id} className="btn delete">
-              Удалить
-            </Link>
-          </div>
-        )}
+        <div className="actions">
+          <Link to={'/change/' + current.id} className="btn edit">
+            Редактировать
+          </Link>
+          <Link to={'/remove/' + current.id} className="btn delete">
+            Удалить
+          </Link>
+        </div>
       </div>
     </div>
   );

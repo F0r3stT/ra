@@ -8,6 +8,7 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
+app.set('trust proxy', 1);
 const port = process.env.SERVER_PORT || 5000;
 
 app.use(helmet());
@@ -20,6 +21,7 @@ app.use(express.json());
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
+    validate: { xForwardedForHeader: false },
     message: { error: 'Слишком много запросов, попробуйте позже' }
 });
 app.use('/api/', limiter);
@@ -37,11 +39,13 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
+        console.error('Ошибка аутентификации: отсутствует токен');
         return res.status(401).json({ error: 'Требуется авторизация' });
     }
     
     jwt.verify(token, process.env.JWT_SECRET || 'secret-key-change-me', (err, user) => {
         if (err) {
+            console.error('Ошибка верификации токена:', err.message);
             return res.status(403).json({ error: 'Недействительный токен' });
         }
         req.user = user;
@@ -50,9 +54,9 @@ const authenticateToken = (req, res, next) => {
 };
 
 const authenticateAdmin = (req, res, next) => {
-    // Проверяем все возможные варианты написания роли админа
     const role = req.user.role;
     if (role !== 'Администратор' && role !== 'admin' && role !== 'Admin') {
+        console.error(`Ошибка доступа: пользователь ${req.user.username} с ролью ${role} попытался выполнить админ-действие`);
         return res.status(403).json({ error: 'Доступ запрещен. Требуются права администратора.' });
     }
     next();
@@ -63,10 +67,12 @@ app.post('/api/auth/register', async (req, res) => {
         const { username, email, password } = req.body;
         
         if (!username || !email || !password) {
+            console.error('Ошибка регистрации: не все поля заполнены');
             return res.status(400).json({ error: 'Все поля обязательны для заполнения' });
         }
         
         if (password.length < 6) {
+            console.error('Ошибка регистрации: пароль слишком короткий');
             return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
         }
         
@@ -96,6 +102,7 @@ app.post('/api/auth/register', async (req, res) => {
             }
         });
     } catch (err) {
+        console.error('Ошибка регистрации:', err.message);
         if (err.code === '23505') {
             res.status(400).json({ error: 'Пользователь с таким email или именем уже существует' });
         } else {
@@ -109,6 +116,7 @@ app.post('/api/auth/login', async (req, res) => {
         const { username, password } = req.body;
         
         if (!username || !password) {
+            console.error('Ошибка входа: не заполнены поля');
             return res.status(400).json({ error: 'Имя пользователя и пароль обязательны' });
         }
         
@@ -118,6 +126,7 @@ app.post('/api/auth/login', async (req, res) => {
         );
         
         if (result.rows.length === 0) {
+            console.error(`Ошибка входа: пользователь ${username} не найден`);
             return res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
         }
         
@@ -125,6 +134,7 @@ app.post('/api/auth/login', async (req, res) => {
         const validPassword = await bcrypt.compare(password, user.password_hash);
         
         if (!validPassword) {
+            console.error(`Ошибка входа: неверный пароль для пользователя ${username}`);
             return res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
         }
         
@@ -145,6 +155,7 @@ app.post('/api/auth/login', async (req, res) => {
             }
         });
     } catch (err) {
+        console.error('Ошибка входа:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -157,11 +168,13 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
         );
         
         if (result.rows.length === 0) {
+            console.error(`Ошибка верификации: пользователь с id ${req.user.id} не найден`);
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
         res.json({ user: result.rows[0] });
     } catch (err) {
+        console.error('Ошибка верификации токена:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -175,6 +188,7 @@ app.get('/api/attacks', authenticateToken, async (req, res) => {
         );
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка инцидентов:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -221,6 +235,7 @@ app.get('/api/attacks/paginated', authenticateToken, async (req, res) => {
             totalPages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
         });
     } catch (err) {
+        console.error('Ошибка пагинации инцидентов:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -234,10 +249,12 @@ app.get('/api/attacks/:id', authenticateToken, async (req, res) => {
             [req.params.id]
         );
         if (result.rows.length === 0) {
+            console.error(`Ошибка: инцидент с id ${req.params.id} не найден`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка получения инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -246,19 +263,17 @@ app.post('/api/attacks', authenticateToken, authenticateAdmin, async (req, res) 
     const client = await pool.connect(); 
     
     try {
-      
         const { name, description, type, protocol, threat_level, status, vulnerability_ids, source_ids, date } = req.body;
         
         if (!name || !description || !protocol) {
+            console.error('Ошибка создания инцидента: не заполнены обязательные поля');
             return res.status(400).json({ error: 'Название, описание и протокол обязательны' });
         }
         
         await client.query('BEGIN'); 
         
-    
         const createdAt = date ? new Date(date) : new Date();
         
-     
         const incidentResult = await client.query(
             `INSERT INTO incidents (name, description, type, protocol, threat_level, status, created_by, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -287,9 +302,11 @@ app.post('/api/attacks', authenticateToken, authenticateAdmin, async (req, res) 
         }
         
         await client.query('COMMIT');
+        console.log(`Инцидент "${name}" создан пользователем ${req.user.username}`);
         res.status(201).json(incidentResult.rows[0]);
     } catch (err) {
         await client.query('ROLLBACK'); 
+        console.error('Ошибка создания инцидента:', err.message);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
@@ -304,7 +321,6 @@ app.put('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req, re
         
         await client.query('BEGIN');
         
-   
         let result;
         if (date) {
             result = await client.query(
@@ -326,10 +342,10 @@ app.put('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req, re
         
         if (result.rows.length === 0) {
             await client.query('ROLLBACK');
+            console.error(`Ошибка обновления: инцидент с id ${req.params.id} не найден`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         
-    
         await client.query('DELETE FROM incident_vulnerability_links WHERE incident_id = $1', [req.params.id]);
         if (vulnerability_ids && vulnerability_ids.length > 0) {
             for (let v_id of vulnerability_ids) {
@@ -340,7 +356,6 @@ app.put('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req, re
             }
         }
         
- 
         await client.query('DELETE FROM incident_source_links WHERE incident_id = $1', [req.params.id]);
         if (source_ids && source_ids.length > 0) {
             for (let s_id of source_ids) {
@@ -352,9 +367,11 @@ app.put('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req, re
         }
         
         await client.query('COMMIT');
+        console.log(`Инцидент с id ${req.params.id} обновлён пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error(`Ошибка обновления инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
@@ -369,18 +386,22 @@ app.delete('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req,
         );
         
         if (checkResult.rows.length === 0) {
+            console.error(`Ошибка удаления: инцидент с id ${req.params.id} не найден`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         
         const status = checkResult.rows[0].status;
         
         if (status === 'Активна') {
+            console.error(`Ошибка удаления: инцидент с id ${req.params.id} имеет статус "Активна"`);
             return res.status(400).json({ error: 'Нельзя удалить активный инцидент. Сначала заблокируйте его.' });
         }
         
         await pool.query('DELETE FROM incidents WHERE id = $1', [req.params.id]);
+        console.log(`Инцидент с id ${req.params.id} удалён пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error(`Ошибка удаления инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -390,6 +411,7 @@ app.get('/api/employees', authenticateToken, authenticateAdmin, async (req, res)
         const result = await pool.query('SELECT * FROM employees ORDER BY id');
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка сотрудников:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -398,10 +420,12 @@ app.get('/api/employees/:id', authenticateToken, authenticateAdmin, async (req, 
     try {
         const result = await pool.query('SELECT * FROM employees WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
+            console.error(`Ошибка: сотрудник с id ${req.params.id} не найден`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка получения сотрудника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -413,8 +437,10 @@ app.post('/api/employees', authenticateToken, authenticateAdmin, async (req, res
             'INSERT INTO employees (full_name, position, email, phone, department) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [full_name, position, email, phone, department]
         );
+        console.log(`Сотрудник "${full_name}" создан пользователем ${req.user.username}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Ошибка создания сотрудника:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -426,8 +452,10 @@ app.put('/api/employees/:id', authenticateToken, authenticateAdmin, async (req, 
             'UPDATE employees SET full_name=$1, position=$2, email=$3, phone=$4, department=$5 WHERE id=$6 RETURNING *',
             [full_name, position, email, phone, department, req.params.id]
         );
+        console.log(`Сотрудник с id ${req.params.id} обновлён пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка обновления сотрудника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -435,8 +463,10 @@ app.put('/api/employees/:id', authenticateToken, authenticateAdmin, async (req, 
 app.delete('/api/employees/:id', authenticateToken, authenticateAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM employees WHERE id=$1', [req.params.id]);
+        console.log(`Сотрудник с id ${req.params.id} удалён пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error(`Ошибка удаления сотрудника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -446,6 +476,7 @@ app.get('/api/sources', authenticateToken, authenticateAdmin, async (req, res) =
         const result = await pool.query('SELECT * FROM incident_sources ORDER BY id');
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка источников:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -454,10 +485,12 @@ app.get('/api/sources/:id', authenticateToken, authenticateAdmin, async (req, re
     try {
         const result = await pool.query('SELECT * FROM incident_sources WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
+            console.error(`Ошибка: источник с id ${req.params.id} не найден`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка получения источника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -469,8 +502,10 @@ app.post('/api/sources', authenticateToken, authenticateAdmin, async (req, res) 
             'INSERT INTO incident_sources (source_name, source_type, ip_address, device_name, contact_info) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [source_name, source_type, ip_address, device_name, contact_info]
         );
+        console.log(`Источник "${source_name}" создан пользователем ${req.user.username}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Ошибка создания источника:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -482,8 +517,10 @@ app.put('/api/sources/:id', authenticateToken, authenticateAdmin, async (req, re
             'UPDATE incident_sources SET source_name=$1, source_type=$2, ip_address=$3, device_name=$4, contact_info=$5 WHERE id=$6 RETURNING *',
             [source_name, source_type, ip_address, device_name, contact_info, req.params.id]
         );
+        console.log(`Источник с id ${req.params.id} обновлён пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка обновления источника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -491,8 +528,10 @@ app.put('/api/sources/:id', authenticateToken, authenticateAdmin, async (req, re
 app.delete('/api/sources/:id', authenticateToken, authenticateAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM incident_sources WHERE id=$1', [req.params.id]);
+        console.log(`Источник с id ${req.params.id} удалён пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error(`Ошибка удаления источника ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -508,6 +547,7 @@ app.get('/api/measures', authenticateToken, authenticateAdmin, async (req, res) 
         `);
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка мер:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -522,10 +562,12 @@ app.get('/api/measures/:id', authenticateToken, authenticateAdmin, async (req, r
             WHERE rm.id = $1
         `, [req.params.id]);
         if (result.rows.length === 0) {
+            console.error(`Ошибка: мера с id ${req.params.id} не найдена`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка получения меры ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -537,8 +579,10 @@ app.post('/api/measures', authenticateToken, authenticateAdmin, async (req, res)
             'INSERT INTO response_measures (measure_name, measure_type, description, incident_id, employee_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [measure_name, measure_type, description, incident_id, employee_id]
         );
+        console.log(`Мера "${measure_name}" создана пользователем ${req.user.username}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Ошибка создания меры:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -550,8 +594,10 @@ app.put('/api/measures/:id', authenticateToken, authenticateAdmin, async (req, r
             'UPDATE response_measures SET measure_name=$1, measure_type=$2, description=$3, incident_id=$4, employee_id=$5 WHERE id=$6 RETURNING *',
             [measure_name, measure_type, description, incident_id, employee_id, req.params.id]
         );
+        console.log(`Мера с id ${req.params.id} обновлена пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка обновления меры ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -559,8 +605,10 @@ app.put('/api/measures/:id', authenticateToken, authenticateAdmin, async (req, r
 app.delete('/api/measures/:id', authenticateToken, authenticateAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM response_measures WHERE id=$1', [req.params.id]);
+        console.log(`Мера с id ${req.params.id} удалена пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error(`Ошибка удаления меры ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -570,6 +618,7 @@ app.get('/api/vulnerabilities', authenticateToken, authenticateAdmin, async (req
         const result = await pool.query('SELECT * FROM vulnerabilities ORDER BY id');
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка уязвимостей:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -578,10 +627,12 @@ app.get('/api/vulnerabilities/:id', authenticateToken, authenticateAdmin, async 
     try {
         const result = await pool.query('SELECT * FROM vulnerabilities WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
+            console.error(`Ошибка: уязвимость с id ${req.params.id} не найдена`);
             return res.status(404).json({ error: 'Не найдено' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка получения уязвимости ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -593,8 +644,10 @@ app.post('/api/vulnerabilities', authenticateToken, authenticateAdmin, async (re
             'INSERT INTO vulnerabilities (vulnerability_type, software_version, system_name, patch_status, threat_level) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [vulnerability_type, software_version, system_name, patch_status, threat_level]
         );
+        console.log(`Уязвимость "${vulnerability_type}" создана пользователем ${req.user.username}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Ошибка создания уязвимости:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -606,8 +659,10 @@ app.put('/api/vulnerabilities/:id', authenticateToken, authenticateAdmin, async 
             'UPDATE vulnerabilities SET vulnerability_type=$1, software_version=$2, system_name=$3, patch_status=$4, threat_level=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6 RETURNING *',
             [vulnerability_type, software_version, system_name, patch_status, threat_level, req.params.id]
         );
+        console.log(`Уязвимость с id ${req.params.id} обновлена пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(`Ошибка обновления уязвимости ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -615,8 +670,10 @@ app.put('/api/vulnerabilities/:id', authenticateToken, authenticateAdmin, async 
 app.delete('/api/vulnerabilities/:id', authenticateToken, authenticateAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM vulnerabilities WHERE id=$1', [req.params.id]);
+        console.log(`Уязвимость с id ${req.params.id} удалена пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error(`Ошибка удаления уязвимости ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -626,6 +683,7 @@ app.get('/api/audit-log', authenticateToken, authenticateAdmin, async (req, res)
         const result = await pool.query('SELECT * FROM audit_log ORDER BY changed_at DESC LIMIT 100');
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения журнала аудита:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -643,6 +701,7 @@ app.get('/api/statistics', authenticateToken, async (req, res) => {
         `);
         res.json(result.rows[0]);
     } catch (err) {
+        console.error('Ошибка получения статистики:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -652,6 +711,7 @@ app.get('/api/incidents', authenticateToken, authenticateAdmin, async (req, res)
         const result = await pool.query('SELECT id, name FROM incidents ORDER BY id');
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения списка инцидентов (id, name):', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -662,6 +722,7 @@ app.get('/api/count-by-period', authenticateToken, async (req, res) => {
         const result = await pool.query('SELECT count_incidents_by_period($1, $2) as count', [start, end]);
         res.json({ count: result.rows[0].count });
     } catch (err) {
+        console.error(`Ошибка подсчёта инцидентов за период ${start} - ${end}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -672,6 +733,7 @@ app.get('/api/avg-response-time', authenticateToken, async (req, res) => {
         const result = await pool.query('SELECT avg_response_time($1, $2, $3) as avg_hours', [employee_id, start, end]);
         res.json({ avg_hours: result.rows[0].avg_hours });
     } catch (err) {
+        console.error(`Ошибка расчёта среднего времени реагирования для сотрудника ${employee_id}:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -682,6 +744,7 @@ app.get('/api/top-vulnerabilities', authenticateToken, async (req, res) => {
         const result = await pool.query('SELECT * FROM get_top_vulnerabilities($1, $2)', [year, quarter]);
         res.json(result.rows);
     } catch (err) {
+        console.error(`Ошибка получения топ уязвимостей за ${year} год ${quarter} квартал:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -702,10 +765,10 @@ app.get('/api/incident-vulnerabilities', authenticateToken, async (req, res) => 
         `);
         res.json(result.rows);
     } catch (err) {
+        console.error('Ошибка получения связей инцидентов с уязвимостями:', err.message);
         res.status(500).json({ error: 'Ошибка сервера: ' + err.message });
     }
 });
-
 
 app.post('/api/incident-vulnerabilities', authenticateToken, authenticateAdmin, async (req, res) => {
     const { incident_id, vulnerability_id } = req.body;
@@ -714,17 +777,18 @@ app.post('/api/incident-vulnerabilities', authenticateToken, authenticateAdmin, 
             'INSERT INTO incident_vulnerability_links (incident_id, vulnerability_id) VALUES ($1, $2)',
             [incident_id, vulnerability_id]
         );
-
+        console.log(`Связь инцидента ${incident_id} с уязвимостью ${vulnerability_id} создана пользователем ${req.user.username}`);
         res.status(201).json({ message: 'Связь успешно создана' });
     } catch (err) {
         if (err.code === '23505') {
+            console.error(`Ошибка: связь инцидента ${incident_id} с уязвимостью ${vulnerability_id} уже существует`);
             res.status(400).json({ error: 'Эта связь уже существует' });
         } else {
+            console.error('Ошибка создания связи:', err.message);
             res.status(500).json({ error: err.message });
         }
     }
 });
-
 
 app.delete('/api/incident-vulnerabilities', authenticateToken, authenticateAdmin, async (req, res) => {
     const { incident_id, vulnerability_id } = req.body;
@@ -734,13 +798,17 @@ app.delete('/api/incident-vulnerabilities', authenticateToken, authenticateAdmin
             [incident_id, vulnerability_id]
         );
         if (result.rowCount === 0) {
+            console.error(`Ошибка: связь инцидента ${incident_id} с уязвимостью ${vulnerability_id} не найдена`);
             return res.status(404).json({ error: 'Связь не найдена' });
         }
+        console.log(`Связь инцидента ${incident_id} с уязвимостью ${vulnerability_id} удалена пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
+        console.error('Ошибка удаления связи:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
+
 app.get('/api/attacks/:id/vulnerabilities', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(
@@ -750,10 +818,10 @@ app.get('/api/attacks/:id/vulnerabilities', authenticateToken, async (req, res) 
         );
         res.json(result.rows);
     } catch (err) { 
+        console.error(`Ошибка получения уязвимостей для инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message }); 
     }
 });
-
 
 app.get('/api/attacks/:id/sources', authenticateToken, async (req, res) => {
     try {
@@ -764,9 +832,11 @@ app.get('/api/attacks/:id/sources', authenticateToken, async (req, res) => {
         );
         res.json(result.rows);
     } catch (err) { 
+        console.error(`Ошибка получения источников для инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message }); 
     }
 });
+
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });
