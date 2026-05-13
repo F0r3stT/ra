@@ -41,13 +41,14 @@ CREATE TABLE IF NOT EXISTS incident_source_links (
     PRIMARY KEY (incident_id, source_id)
 );
 
-CREATE TABLE IF NOT EXISTS employees (
+CREATE TABLE IF NOT EXISTS response_measures (
     id SERIAL PRIMARY KEY,
-    full_name VARCHAR(150) NOT NULL,
-    position VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    phone VARCHAR(20),
-    department VARCHAR(100)
+    measure_name VARCHAR(150) NOT NULL,
+    measure_type VARCHAR(50) NOT NULL,
+    description TEXT,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    incident_id INTEGER REFERENCES incidents(id) ON DELETE CASCADE,
+    employee_id INTEGER REFERENCES employees(id)
 );
 
 CREATE TABLE IF NOT EXISTS response_actions (
@@ -99,14 +100,15 @@ AS $$
 DECLARE
     avg_hours NUMERIC;
 BEGIN
-    SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at))/3600)
+    SELECT AVG(EXTRACT(EPOCH FROM (i.closed_at - i.created_at))/3600)
     INTO avg_hours
     FROM incidents i
-    JOIN response_actions ra ON i.id = ra.incident_id
-    WHERE ra.employee_id = p_employee_id
+    JOIN response_measures rm ON i.id = rm.incident_id
+    WHERE rm.employee_id = p_employee_id
         AND i.status = 'Закрыта'
-        AND i.closed_at BETWEEN p_start_date AND p_end_date
-        AND i.created_at IS NOT NULL;
+        AND DATE(i.closed_at) BETWEEN p_start_date AND p_end_date
+        AND i.created_at IS NOT NULL
+        AND i.closed_at IS NOT NULL;
     
     RETURN COALESCE(avg_hours, 0);
 END;
@@ -299,3 +301,21 @@ CREATE TRIGGER trg_check_vulnerability_link
 BEFORE INSERT ON incident_vulnerability_links
 FOR EACH ROW
 EXECUTE FUNCTION check_vulnerability_status();
+
+CREATE OR REPLACE FUNCTION set_closed_at_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'Закрыта' AND OLD.status != 'Закрыта' THEN
+        NEW.closed_at = CURRENT_TIMESTAMP;
+    ELSIF NEW.status != 'Закрыта' THEN
+        NEW.closed_at = NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_closed_at_time ON incidents;
+CREATE TRIGGER trg_set_closed_at_time
+BEFORE UPDATE ON incidents
+FOR EACH ROW
+EXECUTE FUNCTION set_closed_at_time();
