@@ -1,11 +1,5 @@
---
--- PostgreSQL database dump
---
 
 \restrict d8izngNnlL5vojKA637DFf5onkvqyAZFfxZN0h53fUwIOP34MZ793zPWrQijUvv
-
--- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
--- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -17,10 +11,6 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: audit_all_changes(); Type: FUNCTION; Schema: public; Owner: postgres
---
 
 CREATE FUNCTION public.audit_all_changes() RETURNS trigger
     LANGUAGE plpgsql
