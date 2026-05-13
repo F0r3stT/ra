@@ -1,15 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import ErrorBlock from '../components/ErrorBlock';
+import axios from 'axios';
 
 function Item() {
   const { id } = useParams();
   const nav = useNavigate();
   const { current, loading, err, loadOne, clearErr } = useApp();
+  const { user } = useAuth();
   const [notFound, setNotFound] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
+  const [relatedVulns, setRelatedVulns] = useState([]);
+  const [relatedSources, setRelatedSources] = useState([]);
+
+  const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
     if (loadedId !== id) {
@@ -24,6 +31,18 @@ function Item() {
       setNotFound(true);
     }
   }, [err]);
+
+  useEffect(() => {
+    if (current && current.id) {
+      axios.get(`/api/attacks/${current.id}/vulnerabilities`)
+        .then(res => setRelatedVulns(res.data))
+        .catch(err => console.error('Ошибка загрузки уязвимостей', err));
+
+      axios.get(`/api/attacks/${current.id}/sources`)
+        .then(res => setRelatedSources(res.data))
+        .catch(err => console.error('Ошибка загрузки источников', err));
+    }
+  }, [current]);
 
   if (loading) {
     return <Loader text="Загрузка данных..." />;
@@ -47,6 +66,12 @@ function Item() {
     return null;
   }
 
+  const getThreatLevelColor = (level) => {
+    if (level <= 2) return '#3fb950';
+    if (level <= 4) return '#d29922';
+    return '#f85149';
+  };
+
   return (
     <div className="page item">
       <div className="back">
@@ -64,7 +89,7 @@ function Item() {
         <div className="grid">
           <div className="field">
             <span className="label">Дата</span>
-            <span className="val">{current.date ? current.date.slice(0,10) : ''}</span>
+            <span className="val">{current.date ? new Date(current.date).toLocaleDateString('ru-RU') : ''}</span>
           </div>
           <div className="field">
             <span className="label">Протокол</span>
@@ -80,6 +105,12 @@ function Item() {
             <span className="label">ID</span>
             <span className="val">#{current.id}</span>
           </div>
+          <div className="field">
+            <span className="label">Уровень угрозы</span>
+            <span className="val" style={{ color: getThreatLevelColor(current.threat_level), fontWeight: 'bold' }}>
+              {current.threat_level} / 5
+            </span>
+          </div>
         </div>
 
         <div className="desc-block">
@@ -87,14 +118,39 @@ function Item() {
           <p>{current.description || current.desc}</p>
         </div>
 
-        <div className="actions">
-          <Link to={'/change/' + current.id} className="btn edit">
-            Редактировать
-          </Link>
-          <Link to={'/remove/' + current.id} className="btn delete">
-            Удалить
-          </Link>
-        </div>
+        {relatedVulns.length > 0 && (
+          <div className="desc-block">
+            <h3>Связанные уязвимости</h3>
+            {relatedVulns.map(v => (
+              <div key={v.id} style={{ padding: '8px 0', borderBottom: '1px solid #2a2f38' }}>
+                <strong>{v.vulnerability_type}</strong> - Статус: {v.patch_status === 'Fixed' ? 'Исправлена' : v.patch_status === 'Open' ? 'Открыта' : v.patch_status === 'Reopened' ? 'Переоткрыта' : 'В работе'}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {relatedSources.length > 0 && (
+          <div className="desc-block">
+            <h3>Источники инцидента</h3>
+            {relatedSources.map(s => (
+              <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid #2a2f38' }}>
+                <strong>{s.source_name}</strong> - {s.source_type}
+                {s.ip_address && <span> (IP: {s.ip_address})</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="actions">
+            <Link to={'/change/' + current.id} className="btn edit">
+              Редактировать
+            </Link>
+            <Link to={'/remove/' + current.id} className="btn delete">
+              Удалить
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );

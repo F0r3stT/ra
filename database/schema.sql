@@ -1,42 +1,47 @@
--- database/schema.sql
+CREATE DATABASE security;
 
-CREATE DATABASE security_monitor;
+\c security;
 
-\c security_monitor;
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(20) DEFAULT 'Пользователь' CHECK (role IN ('Пользователь', 'Администратор')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Таблица инцидентов
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
     description TEXT NOT NULL,
-    type VARCHAR(50) NOT NULL CHECK (type IN ('External', 'Internal')),
+    type VARCHAR(50) NOT NULL CHECK (type IN ('Внешняя', 'Внутренняя')),
     protocol VARCHAR(50) NOT NULL,
     threat_level INTEGER DEFAULT 3 CHECK (threat_level BETWEEN 1 AND 5),
-    status VARCHAR(50) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Blocked', 'Closed')),
+    status VARCHAR(50) NOT NULL DEFAULT 'Активна' CHECK (status IN ('Активна', 'Заблокирована', 'Закрыта')),
+    created_by INTEGER REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP
 );
 
--- Таблица источников инцидентов
-CREATE TABLE incident_sources (
+CREATE TABLE IF NOT EXISTS incident_sources (
     id SERIAL PRIMARY KEY,
     source_name VARCHAR(100) NOT NULL,
-    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('System', 'Device', 'Person')),
+    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('Система', 'Устройство', 'Человек')),
     ip_address INET,
     device_name VARCHAR(100),
     contact_info VARCHAR(200)
 );
 
--- Таблица связи инцидентов с источниками
-CREATE TABLE incident_source_links (
+CREATE TABLE IF NOT EXISTS incident_source_links (
     incident_id INTEGER REFERENCES incidents(id) ON DELETE CASCADE,
     source_id INTEGER REFERENCES incident_sources(id) ON DELETE CASCADE,
     PRIMARY KEY (incident_id, source_id)
 );
 
--- Таблица сотрудников
-CREATE TABLE employees (
+CREATE TABLE IF NOT EXISTS employees (
     id SERIAL PRIMARY KEY,
     full_name VARCHAR(150) NOT NULL,
     position VARCHAR(100) NOT NULL,
@@ -45,8 +50,7 @@ CREATE TABLE employees (
     department VARCHAR(100)
 );
 
--- Таблица мер реагирования
-CREATE TABLE response_actions (
+CREATE TABLE IF NOT EXISTS response_actions (
     id SERIAL PRIMARY KEY,
     action_name VARCHAR(150) NOT NULL,
     action_type VARCHAR(50) NOT NULL,
@@ -56,27 +60,24 @@ CREATE TABLE response_actions (
     employee_id INTEGER REFERENCES employees(id)
 );
 
--- Таблица уязвимостей
-CREATE TABLE vulnerabilities (
+CREATE TABLE IF NOT EXISTS vulnerabilities (
     id SERIAL PRIMARY KEY,
     vulnerability_type VARCHAR(100) NOT NULL,
     software_version VARCHAR(50),
     system_name VARCHAR(100),
-    patch_status VARCHAR(50) DEFAULT 'Open' CHECK (patch_status IN ('Open', 'Fixed', 'InProgress', 'Reopened')),
+    patch_status VARCHAR(50) DEFAULT 'Открыта' CHECK (patch_status IN ('Открыта', 'Исправлена', 'В работе', 'Переоткрыта')),
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fixed_at TIMESTAMP,
     threat_level INTEGER CHECK (threat_level BETWEEN 1 AND 5)
 );
 
--- Таблица связи инцидентов с уязвимостями
-CREATE TABLE incident_vulnerability_links (
+CREATE TABLE IF NOT EXISTS incident_vulnerability_links (
     incident_id INTEGER REFERENCES incidents(id) ON DELETE CASCADE,
     vulnerability_id INTEGER REFERENCES vulnerabilities(id) ON DELETE CASCADE,
     PRIMARY KEY (incident_id, vulnerability_id)
 );
 
--- Таблица аудита
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id SERIAL PRIMARY KEY,
     table_name VARCHAR(50) NOT NULL,
     record_id INTEGER NOT NULL,
@@ -87,9 +88,6 @@ CREATE TABLE audit_log (
     changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Пользовательские функции
-
--- Функция 1: подсчет средней скорости реагирования
 CREATE OR REPLACE FUNCTION avg_response_time(
     p_employee_id INTEGER,
     p_start_date DATE,
@@ -106,7 +104,7 @@ BEGIN
     FROM incidents i
     JOIN response_actions ra ON i.id = ra.incident_id
     WHERE ra.employee_id = p_employee_id
-        AND i.status = 'Closed'
+        AND i.status = 'Закрыта'
         AND i.closed_at BETWEEN p_start_date AND p_end_date
         AND i.created_at IS NOT NULL;
     
@@ -114,7 +112,6 @@ BEGIN
 END;
 $$;
 
--- Функция 2: проверка корректности уровня угрозы
 CREATE OR REPLACE FUNCTION is_valid_threat_level(
     p_incident_id INTEGER
 )
@@ -132,7 +129,6 @@ BEGIN
 END;
 $$;
 
--- Функция 3: подсчет инцидентов за период
 CREATE OR REPLACE FUNCTION count_incidents_by_period(
     p_start_date DATE,
     p_end_date DATE
@@ -152,7 +148,6 @@ BEGIN
 END;
 $$;
 
--- Функция 4: анализ уязвимостей за квартал
 CREATE OR REPLACE FUNCTION get_top_vulnerabilities(
     p_year INTEGER,
     p_quarter INTEGER
@@ -186,79 +181,76 @@ BEGIN
 END;
 $$;
 
--- Триггеры
-
--- Триггер 1: аудит при вставке
 CREATE OR REPLACE FUNCTION audit_insert_incident()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     INSERT INTO audit_log (table_name, record_id, action, new_data, changed_by)
-    VALUES ('incidents', NEW.id, 'INSERT', row_to_json(NEW), CURRENT_USER);
+    VALUES ('incidents', NEW.id, 'ВСТАВКА', row_to_json(NEW), CURRENT_USER);
     RETURN NEW;
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_audit_incident_insert ON incidents;
 CREATE TRIGGER trg_audit_incident_insert
 AFTER INSERT ON incidents
 FOR EACH ROW
 EXECUTE FUNCTION audit_insert_incident();
 
--- Триггер 2: аудит при обновлении
 CREATE OR REPLACE FUNCTION audit_update_incident()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     INSERT INTO audit_log (table_name, record_id, action, old_data, new_data, changed_by)
-    VALUES ('incidents', NEW.id, 'UPDATE', row_to_json(OLD), row_to_json(NEW), CURRENT_USER);
+    VALUES ('incidents', NEW.id, 'ОБНОВЛЕНИЕ', row_to_json(OLD), row_to_json(NEW), CURRENT_USER);
     RETURN NEW;
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_audit_incident_update ON incidents;
 CREATE TRIGGER trg_audit_incident_update
 AFTER UPDATE ON incidents
 FOR EACH ROW
 EXECUTE FUNCTION audit_update_incident();
 
--- Триггер 3: проверка корректности уровня угрозы
 CREATE OR REPLACE FUNCTION check_threat_level()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.threat_level < 1 OR NEW.threat_level > 5 THEN
-        RAISE EXCEPTION 'Threat level must be between 1 and 5. Got: %', NEW.threat_level;
+        RAISE EXCEPTION 'Уровень угрозы должен быть от 1 до 5. Получено: %', NEW.threat_level;
     END IF;
     RETURN NEW;
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_check_threat_level ON incidents;
 CREATE TRIGGER trg_check_threat_level
 BEFORE INSERT OR UPDATE ON incidents
 FOR EACH ROW
 EXECUTE FUNCTION check_threat_level();
 
--- Триггер 4: запрет удаления активных инцидентов
 CREATE OR REPLACE FUNCTION prevent_active_incident_deletion()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF OLD.status IN ('Active', 'Blocked') THEN
-        RAISE EXCEPTION 'Cannot delete incident with status "%". Only closed incidents can be deleted.', OLD.status;
+    IF OLD.status IN ('Активна', 'Заблокирована') THEN
+        RAISE EXCEPTION 'Нельзя удалить инцидент со статусом "%". Сначала закройте его.', OLD.status;
     END IF;
     RETURN OLD;
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_prevent_active_deletion ON incidents;
 CREATE TRIGGER trg_prevent_active_deletion
 BEFORE DELETE ON incidents
 FOR EACH ROW
 EXECUTE FUNCTION prevent_active_incident_deletion();
 
--- Триггер 5: автоматическое обновление updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -269,17 +261,18 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_update_incident_timestamp ON incidents;
 CREATE TRIGGER trg_update_incident_timestamp
 BEFORE UPDATE ON incidents
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trg_update_vulnerability_timestamp ON vulnerabilities;
 CREATE TRIGGER trg_update_vulnerability_timestamp
 BEFORE UPDATE ON vulnerabilities
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
--- Триггер 6: контроль связи с уязвимостями
 CREATE OR REPLACE FUNCTION check_vulnerability_status()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -291,9 +284,9 @@ BEGIN
     FROM vulnerabilities
     WHERE id = NEW.vulnerability_id;
     
-    IF vuln_status = 'Fixed' THEN
+    IF vuln_status = 'Исправлена' THEN
         UPDATE vulnerabilities 
-        SET patch_status = 'Reopened', updated_at = CURRENT_TIMESTAMP
+        SET patch_status = 'Переоткрыта', updated_at = CURRENT_TIMESTAMP
         WHERE id = NEW.vulnerability_id;
     END IF;
     
@@ -301,27 +294,8 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_check_vulnerability_link ON incident_vulnerability_links;
 CREATE TRIGGER trg_check_vulnerability_link
 BEFORE INSERT ON incident_vulnerability_links
 FOR EACH ROW
 EXECUTE FUNCTION check_vulnerability_status();
-
--- Хеширование чувствительных данных (дополнительная функция)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-CREATE OR REPLACE FUNCTION hash_sensitive_data()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NEW.email IS NOT NULL THEN
-        NEW.email = encode(sha256(NEW.email::bytea), 'hex');
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_hash_employee_email
-BEFORE INSERT OR UPDATE ON employees
-FOR EACH ROW
-EXECUTE FUNCTION hash_sensitive_data();

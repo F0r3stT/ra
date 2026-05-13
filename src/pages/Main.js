@@ -1,20 +1,49 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import ErrorBlock from '../components/ErrorBlock';
 import Statistics from '../components/Statistics';
+import axios from 'axios';
 
 function Main() {
+  const [links, setLinks] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [vulnerabilities, setVulnerabilities] = useState([]);
+  const [measures, setMeasures] = useState([]);
+  const [sources, setSources] = useState([]);
+const { user } = useAuth();
+  const isAdmin = user?.role === 'Администратор' || user?.role === 'admin' || user?.role === 'Admin';
   const { items, loading, err, loadAll, clearErr } = useApp();
 
-useEffect(() => {
+  useEffect(() => {
     loadAll();
-}, [loadAll]);
+  }, [loadAll]);
 
-  if (loading && items.length === 0) {
-    return <Loader />;
-  }
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!isAdmin) return; 
+      
+      try {
+        const [linksRes, employeesRes, vulnsRes, measuresRes, sourcesRes] = await Promise.all([
+          axios.get('/api/incident-vulnerabilities'),
+          axios.get('/api/employees'),
+          axios.get('/api/vulnerabilities'),
+          axios.get('/api/measures'),
+          axios.get('/api/sources')
+        ]);
+        setLinks(linksRes.data);
+        setEmployees(employeesRes.data);
+        setVulnerabilities(vulnsRes.data);
+        setMeasures(measuresRes.data);
+        setSources(sourcesRes.data);
+      } catch (error) {
+        console.error('Ошибка загрузки данных:', error);
+      }
+    };
+    fetchData();
+  }, [isAdmin]);
 
   const active = items.filter(x => x.status === 'Активна').length;
   const blocked = items.filter(x => x.status === 'Заблокирована').length;
@@ -29,10 +58,12 @@ useEffect(() => {
       
       {err && <ErrorBlock msg={err} onClose={clearErr} />}
 
+      <Statistics attacks={items} />
+
       <div className="stats">
         <div className="card total">
           <span className="num">{items.length}</span>
-          <span>Всего</span>
+          <span>Всего инцидентов</span>
         </div>
         <div className="card active">
           <span className="num">{active}</span>
@@ -52,7 +83,54 @@ useEffect(() => {
         </div>
       </div>
 
-      <Statistics attacks={items} />
+      {isAdmin && (
+        <>
+          <div className="stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+            <div className="card">
+              <h3>Сотрудники</h3>
+              <span className="num">{employees.length}</span>
+              <span>человек в службе безопасности</span>
+              <Link to="/employees" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
+            </div>
+            <div className="card">
+              <h3>Источники инцидентов</h3>
+              <span className="num">{sources.length}</span>
+              <span>источников</span>
+              <Link to="/sources" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
+            </div>
+          </div>
+
+          <div className="stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            <div className="card">
+              <h3>Меры реагирования</h3>
+              <span className="num">{measures.length}</span>
+              <span>применено мер</span>
+              <Link to="/measures" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
+            </div>
+            <div className="card">
+              <h3>Уязвимости</h3>
+              <span className="num">{vulnerabilities.length}</span>
+              <span>зарегистрировано</span>
+              <Link to="/vulnerabilities" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
+            </div>
+            <div className="card">
+              <h3>Связи с уязвимостями</h3>
+              <span className="num">{links.length}</span>
+              <span>связей</span>
+              <Link to="/links" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
+            </div>
+          </div>
+
+          <div className="stats" style={{ gridTemplateColumns: 'repeat(1, 1fr)' }}>
+            <div className="card">
+              <h3>Журнал аудита</h3>
+              <span className="num">все изменения</span>
+              <span>отслеживаются</span>
+              <Link to="/audit" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Просмотр →</Link>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="last">
         <h3>Последние атаки</h3>
@@ -77,7 +155,7 @@ useEffect(() => {
                     {x.status}
                   </span>
                 </div>
-                <div>{x.date}</div>
+                <div>{x.date ? new Date(x.date).toLocaleDateString('ru-RU') : ''}</div>
               </div>
             ))}
           </div>

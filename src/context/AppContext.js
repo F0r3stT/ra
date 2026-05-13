@@ -26,7 +26,7 @@ export function AppProvider({ children }) {
       const res = await api.getAll();
       setItems(res.data);
     } catch (e) {
-      setErr('Ошибка загрузки данных');
+      setErr('Ошибка БД: ' + e.message); 
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export function AppProvider({ children }) {
       setItems(prev => [...prev, res.data]);
       return true;
     } catch (e) {
-      setErr('Не удалось добавить');
+      setErr(e.message || 'Не удалось добавить');
       return false;
     } finally {
       setLoading(false);
@@ -75,29 +75,70 @@ export function AppProvider({ children }) {
       return true;
     } catch (e) {
       console.error('Update error:', e);
-      setErr('Не удалось обновить');
+      setErr(e.message || 'Не удалось обновить');
       return false;
     } finally {
       setLoading(false);
     }
   }, []);
 
-const deleteItem = useCallback(async (id) => {
+  const deleteItem = useCallback(async (id) => {
     setLoading(true);
     setErr('');
     try {
-        await api.remove(id);
+        const token = localStorage.getItem('token');
+        
+        if (!token) {
+            setErr('Сессия истекла, войдите снова');
+            return false;
+        }
+        
+        const response = await fetch(`/api/attacks/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            setErr('Сессия истекла, войдите снова');
+            return false;
+        }
+        
+        if (response.status === 403) {
+            setErr('Нет прав для удаления');
+            return false;
+        }
+        
+        if (response.status === 400) {
+            const error = await response.json();
+            setErr(error.error || 'Нельзя удалить активный инцидент');
+            return false;
+        }
+        
+        if (response.status === 404) {
+            setErr('Запись не найдена');
+            return false;
+        }
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: 'Ошибка сервера' }));
+            setErr(error.error || 'Не удалось удалить');
+            return false;
+        }
+        
         const numId = Number(id);
         setItems(prev => prev.filter(x => Number(x.id) !== numId));
         return true;
     } catch (e) {
-        const errorMessage = e.message || 'Не удалось удалить';
-        setErr(errorMessage);
+        setErr(e.message || 'Не удалось удалить');
         return false;
     } finally {
         setLoading(false);
     }
-}, []);
+  }, []);
 
   const value = {
     items,
