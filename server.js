@@ -36,11 +36,17 @@ const pool = new Pool({
 });
 
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,             // Меняем порт на 587
+    secure: false,         // Для 587 порта это значение ДОЛЖНО быть false
+    requireTLS: true,      // Но мы требуем обязательного шифрования соединения
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    }
+    },
+    connectionTimeout: 10000,
+    logger: true,
+    debug: true
 });
 
 const emailCodes = new Map();
@@ -49,14 +55,32 @@ function generateCode() {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-function sendVerificationCode(email, code) {
-    console.log('');
-    console.log('========== КОД ПОДТВЕРЖДЕНИЯ ==========');
-    console.log(`Email: ${email}`);
-    console.log(`Код: ${code}`);
-    console.log('========================================');
-    console.log('');
-    return Promise.resolve();
+// Функция отправки письма через nodemailer
+async function sendVerificationCode(email, code) {
+    const mailOptions = {
+        from: `"Security System" <${process.env.EMAIL_USER}>`, // От кого
+        to: email, // Кому
+        subject: 'Код подтверждения регистрации', // Тема письма
+        html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #e4e6eb; background-color: #1a1e24; border-radius: 8px;">
+                <h2 style="color: #8ab4f8;">Безопасность сетей: Подтверждение email</h2>
+                <p>Вы запросили регистрацию в системе мониторинга сетевых атак.</p>
+                <p>Ваш код подтверждения:</p>
+                <div style="background-color: #0b0f14; padding: 15px; border-radius: 6px; display: inline-block; margin: 10px 0;">
+                    <h1 style="color: #3fb950; letter-spacing: 5px; margin: 0;">${code}</h1>
+                </div>
+                <p style="color: #888; font-size: 12px;">Код действителен 10 минут. Если вы не запрашивали этот код, просто проигнорируйте письмо.</p>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Письмо успешно отправлено на ${email}`);
+    } catch (error) {
+        console.error('Ошибка отправки письма:', error);
+        throw new Error('Не удалось отправить письмо на почту. Проверьте настройки SMTP.');
+    }
 }
 
 
