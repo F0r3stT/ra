@@ -1,5 +1,4 @@
-const API_URL = '/api/auth';
-
+const API_URL = 'http://138.124.29.231:5000/api/auth';
 export async function sendCode(email) {
     const response = await fetch(`${API_URL}/send-code`, {
         method: 'POST',

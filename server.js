@@ -7,6 +7,8 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 require('dotenv').config();
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -14,7 +16,7 @@ const port = process.env.SERVER_PORT || 5000;
 
 app.use(helmet());
 app.use(cors({
-    origin: 'http://localhost:3000',
+origin: ['http://localhost:3000', 'http://138.124.29.231:3000'],
     credentials: true
 }));
 app.use(express.json());
