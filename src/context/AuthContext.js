@@ -32,9 +32,9 @@ export function AuthProvider({ children }) {
         }
     }, []);
 
-    const register = useCallback(async (username, email, password) => {
+    const register = useCallback(async (username, email, password, verified) => {
         try {
-            const response = await authApi.register(username, email, password);
+            const response = await authApi.register(username, email, password, verified);
             localStorage.setItem('token', response.token);
             setToken(response.token);
             setUser(response.user);

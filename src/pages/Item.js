@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import ErrorBlock from '../components/ErrorBlock';
 import axios from 'axios';
@@ -9,10 +10,13 @@ function Item() {
   const { id } = useParams();
   const nav = useNavigate();
   const { current, loading, err, loadOne, clearErr } = useApp();
+  const { user } = useAuth();
   const [notFound, setNotFound] = useState(false);
   const [loadedId, setLoadedId] = useState(null);
   const [relatedVulns, setRelatedVulns] = useState([]);
   const [relatedSources, setRelatedSources] = useState([]);
+
+  const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
     if (loadedId !== id) {
@@ -33,7 +37,6 @@ function Item() {
       axios.get(`/api/attacks/${current.id}/vulnerabilities`)
         .then(res => setRelatedVulns(res.data))
         .catch(err => console.error('Ошибка загрузки уязвимостей', err));
-
       axios.get(`/api/attacks/${current.id}/sources`)
         .then(res => setRelatedSources(res.data))
         .catch(err => console.error('Ошибка загрузки источников', err));
@@ -119,7 +122,7 @@ function Item() {
             <h3>Связанные уязвимости</h3>
             {relatedVulns.map(v => (
               <div key={v.id} style={{ padding: '8px 0', borderBottom: '1px solid #2a2f38' }}>
-                <strong>{v.vulnerability_type}</strong> - Статус: {v.patch_status === 'Fixed' ? 'Исправлена' : v.patch_status === 'Open' ? 'Открыта' : v.patch_status === 'Reopened' ? 'Переоткрыта' : 'В работе'}
+                <strong>{v.vulnerability_type}</strong> - Статус: {v.patch_status === 'Исправлена' ? 'Исправлена' : v.patch_status === 'Открыта' ? 'Открыта' : v.patch_status === 'Переоткрыта' ? 'Переоткрыта' : 'В работе'}
               </div>
             ))}
           </div>
@@ -137,14 +140,16 @@ function Item() {
           </div>
         )}
 
-        <div className="actions">
-          <Link to={'/change/' + current.id} className="btn edit">
-            Редактировать
-          </Link>
-          <Link to={'/remove/' + current.id} className="btn delete">
-            Удалить
-          </Link>
-        </div>
+        {isAdmin && (
+          <div className="actions">
+            <Link to={'/change/' + current.id} className="btn edit">
+              Редактировать
+            </Link>
+            <Link to={'/remove/' + current.id} className="btn delete">
+              Удалить
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -34,6 +35,31 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'security',
 });
 
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+const emailCodes = new Map();
+
+function generateCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function sendVerificationCode(email, code) {
+    console.log('');
+    console.log('========== КОД ПОДТВЕРЖДЕНИЯ ==========');
+    console.log(`Email: ${email}`);
+    console.log(`Код: ${code}`);
+    console.log('========================================');
+    console.log('');
+    return Promise.resolve();
+}
+
+
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -62,18 +88,82 @@ const authenticateAdmin = (req, res, next) => {
     next();
 };
 
+app.post('/api/auth/send-code', async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        if (!email) {
+            return res.status(400).json({ error: 'Email обязателен' });
+        }
+        
+        const existingUser = await pool.query(
+            'SELECT id FROM users WHERE email = $1',
+            [email]
+        );
+        
+        if (existingUser.rows.length > 0) {
+            return res.status(400).json({ error: 'Пользователь с таким email уже существует' });
+        }
+        
+        const code = generateCode();
+        emailCodes.set(email, { code, expires: Date.now() + 10 * 60 * 1000 });
+        
+        await sendVerificationCode(email, code);
+        
+        res.json({ message: 'Код подтверждения отправлен на почту' });
+    } catch (err) {
+        console.error('Ошибка отправки кода:', err);
+        res.status(500).json({ error: 'Не удалось отправить код на почту' });
+    }
+});
+
+app.post('/api/auth/verify-code', async (req, res) => {
+    try {
+        const { email, code } = req.body;
+        
+        if (!email || !code) {
+            return res.status(400).json({ error: 'Email и код обязательны' });
+        }
+        
+        const stored = emailCodes.get(email);
+        
+        if (!stored) {
+            return res.status(400).json({ error: 'Код не найден. Запросите новый код' });
+        }
+        
+        if (stored.expires < Date.now()) {
+            emailCodes.delete(email);
+            return res.status(400).json({ error: 'Код истёк. Запросите новый код' });
+        }
+        
+        if (stored.code !== code) {
+            return res.status(400).json({ error: 'Неверный код подтверждения' });
+        }
+        
+        emailCodes.delete(email);
+        
+        res.json({ message: 'Код подтверждён' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { username, email, password, verified } = req.body;
         
         if (!username || !email || !password) {
             console.error('Ошибка регистрации: не все поля заполнены');
-            return res.status(400).json({ error: 'Все поля обязательны для заполнения' });
+            return res.status(400).json({ error: 'Все поля обязательны' });
         }
         
         if (password.length < 6) {
             console.error('Ошибка регистрации: пароль слишком короткий');
             return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
+        }
+        
+        if (!verified) {
+            return res.status(400).json({ error: 'Необходимо подтвердить email' });
         }
         
         const hashedPassword = await bcrypt.hash(password, 10);

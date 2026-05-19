@@ -4,6 +4,7 @@ import { AppProvider } from './context/AppContext';
 import { AuthProvider } from './context/AuthContext';
 import { setUnauthorizedHandler } from './services/requests';
 import PrivateRoute from './components/PrivateRoute';
+import AdminRoute from './components/AdminRoute';
 import Toast from './components/Toast';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -28,7 +29,6 @@ import SourceForm from './pages/sources/SourceForm';
 import axios from 'axios';
 import './App.css';
 
-
 axios.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -37,11 +37,9 @@ axios.interceptors.request.use((config) => {
     return config;
 });
 
-
 axios.interceptors.response.use(
     (response) => response,
     (error) => {
-
         if (error.response && error.response.status === 401) {
             localStorage.removeItem('token');
             if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
@@ -51,8 +49,6 @@ axios.interceptors.response.use(
         return Promise.reject(error);
     }
 );
-
-
 
 function App() {
     const [toast, setToast] = useState({ show: false, message: '', type: 'error' });
@@ -83,23 +79,23 @@ function App() {
                                 <Route path="/" element={<PrivateRoute><Main showToast={showToast} /></PrivateRoute>} />
                                 <Route path="/list" element={<PrivateRoute><List showToast={showToast} /></PrivateRoute>} />
                                 <Route path="/item/:id" element={<PrivateRoute><Item showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/create" element={<PrivateRoute><Create showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/change/:id" element={<PrivateRoute><Change showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/remove/:id" element={<PrivateRoute><Remove showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/audit" element={<PrivateRoute><Audit showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/functions" element={<PrivateRoute><Functions showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/employees" element={<PrivateRoute><EmployeesList showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/employees/create" element={<PrivateRoute><EmployeeForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/employees/edit/:id" element={<PrivateRoute><EmployeeForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/sources" element={<PrivateRoute><SourcesList showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/sources/create" element={<PrivateRoute><SourceForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/sources/edit/:id" element={<PrivateRoute><SourceForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/measures" element={<PrivateRoute><MeasuresList showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/measures/create" element={<PrivateRoute><MeasureForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/measures/edit/:id" element={<PrivateRoute><MeasureForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/vulnerabilities" element={<PrivateRoute><VulnerabilitiesList showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/vulnerabilities/create" element={<PrivateRoute><VulnerabilityForm showToast={showToast} /></PrivateRoute>} />
-                                <Route path="/vulnerabilities/edit/:id" element={<PrivateRoute><VulnerabilityForm showToast={showToast} /></PrivateRoute>} />
+                                <Route path="/create" element={<AdminRoute><Create showToast={showToast} /></AdminRoute>} />
+                                <Route path="/change/:id" element={<AdminRoute><Change showToast={showToast} /></AdminRoute>} />
+                                <Route path="/remove/:id" element={<AdminRoute><Remove showToast={showToast} /></AdminRoute>} />
+                                <Route path="/audit" element={<AdminRoute><Audit showToast={showToast} /></AdminRoute>} />
+                                <Route path="/functions" element={<AdminRoute><Functions showToast={showToast} /></AdminRoute>} />
+                                <Route path="/employees" element={<AdminRoute><EmployeesList showToast={showToast} /></AdminRoute>} />
+                                <Route path="/employees/create" element={<AdminRoute><EmployeeForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/employees/edit/:id" element={<AdminRoute><EmployeeForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/sources" element={<AdminRoute><SourcesList showToast={showToast} /></AdminRoute>} />
+                                <Route path="/sources/create" element={<AdminRoute><SourceForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/sources/edit/:id" element={<AdminRoute><SourceForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/measures" element={<AdminRoute><MeasuresList showToast={showToast} /></AdminRoute>} />
+                                <Route path="/measures/create" element={<AdminRoute><MeasureForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/measures/edit/:id" element={<AdminRoute><MeasureForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/vulnerabilities" element={<AdminRoute><VulnerabilitiesList showToast={showToast} /></AdminRoute>} />
+                                <Route path="/vulnerabilities/create" element={<AdminRoute><VulnerabilityForm showToast={showToast} /></AdminRoute>} />
+                                <Route path="/vulnerabilities/edit/:id" element={<AdminRoute><VulnerabilityForm showToast={showToast} /></AdminRoute>} />
                             </Routes>
                         </main>
                         <Footer />

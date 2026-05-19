@@ -1,15 +1,23 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 
-function Login() {
+function Login({ showToast }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state?.error) {
+      setError(location.state.error);
+      if (showToast) showToast(location.state.error, 'error');
+    }
+  }, [location, showToast]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +31,7 @@ function Login() {
       navigate('/');
     } else {
       setError(result.error);
+      if (showToast) showToast(result.error, 'error');
     }
   };
 

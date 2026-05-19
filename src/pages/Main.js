@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
@@ -7,15 +7,23 @@ import ErrorBlock from '../components/ErrorBlock';
 import Statistics from '../components/Statistics';
 import axios from 'axios';
 
-function Main() {
-  const [links, setLinks] = useState([]);
+function Main({ showToast }) {
   const [employees, setEmployees] = useState([]);
   const [vulnerabilities, setVulnerabilities] = useState([]);
   const [measures, setMeasures] = useState([]);
   const [sources, setSources] = useState([]);
-const { user } = useAuth();
+  const { user } = useAuth();
+  const location = useLocation();
+  const [redirectError, setRedirectError] = useState('');
   const isAdmin = user?.role === 'Администратор' || user?.role === 'admin' || user?.role === 'Admin';
   const { items, loading, err, loadAll, clearErr } = useApp();
+
+  useEffect(() => {
+    if (location.state?.error) {
+      setRedirectError(location.state.error);
+      setTimeout(() => setRedirectError(''), 3000);
+    }
+  }, [location]);
 
   useEffect(() => {
     loadAll();
@@ -23,17 +31,14 @@ const { user } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!isAdmin) return; 
-      
+      if (!isAdmin) return;
       try {
-        const [linksRes, employeesRes, vulnsRes, measuresRes, sourcesRes] = await Promise.all([
-          axios.get('/api/incident-vulnerabilities'),
+        const [employeesRes, vulnsRes, measuresRes, sourcesRes] = await Promise.all([
           axios.get('/api/employees'),
           axios.get('/api/vulnerabilities'),
           axios.get('/api/measures'),
           axios.get('/api/sources')
         ]);
-        setLinks(linksRes.data);
         setEmployees(employeesRes.data);
         setVulnerabilities(vulnsRes.data);
         setMeasures(measuresRes.data);
@@ -52,11 +57,22 @@ const { user } = useAuth();
 
   const last = [...items].reverse().slice(0, 5);
 
+  if (loading && items.length === 0) {
+    return <Loader />;
+  }
+
   return (
     <div className="page">
-      <h2>Мониторинг атак</h2>
-      
+      {redirectError && (
+        <div className="error" style={{ marginBottom: '20px' }}>
+          <span>{redirectError}</span>
+          <button onClick={() => setRedirectError('')} className="close">×</button>
+        </div>
+      )}
+
       {err && <ErrorBlock msg={err} onClose={clearErr} />}
+
+      <h2>Мониторинг атак</h2>
 
       <Statistics attacks={items} />
 
@@ -100,7 +116,7 @@ const { user } = useAuth();
             </div>
           </div>
 
-          <div className="stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
             <div className="card">
               <h3>Меры реагирования</h3>
               <span className="num">{measures.length}</span>
@@ -112,12 +128,6 @@ const { user } = useAuth();
               <span className="num">{vulnerabilities.length}</span>
               <span>зарегистрировано</span>
               <Link to="/vulnerabilities" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
-            </div>
-            <div className="card">
-              <h3>Связи с уязвимостями</h3>
-              <span className="num">{links.length}</span>
-              <span>связей</span>
-              <Link to="/links" style={{ display: 'block', marginTop: '15px', color: '#8ab4f8' }}>Управление →</Link>
             </div>
           </div>
 
