@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import ErrorBlock from '../components/ErrorBlock';
 import Statistics from '../components/Statistics';
+import ThreatMap from '../components/ThreatMap';
 import axios from 'axios';
 
 function Main({ showToast }) {
@@ -99,6 +100,9 @@ function Main({ showToast }) {
         </div>
       </div>
 
+      <div style={{ marginTop: '20px', marginBottom: '30px' }}>
+        <ThreatMap />
+      </div>
       {isAdmin && (
         <>
           <div className="stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>

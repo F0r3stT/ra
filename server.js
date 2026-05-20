@@ -57,6 +57,23 @@ function generateCode() {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Функция для подмены системного пользователя БД на реального пользователя сайта в журнале аудита
+async function updateAuditLogUser(tableName, recordId, username) {
+    try {
+        await pool.query(
+            `UPDATE audit_log 
+             SET changed_by = $1 
+             WHERE id = (
+                 SELECT id FROM audit_log 
+                 WHERE table_name = $2 AND record_id = $3 
+                 ORDER BY changed_at DESC LIMIT 1
+             )`, 
+            [username, tableName, recordId]
+        );
+    } catch (err) {
+        console.error('Ошибка обновления автора в журнале аудита:', err);
+    }
+}
 // Функция отправки письма через nodemailer
 async function sendVerificationCode(email, code) {
     const mailOptions = {
@@ -169,6 +186,42 @@ app.post('/api/auth/verify-code', async (req, res) => {
         emailCodes.delete(email);
         
         res.json({ message: 'Код подтверждён' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- КИЛЛЕР-ФИЧА: GEO-IP КАРТА АТАК ---
+// --- КИЛЛЕР-ФИЧА: GEO-IP КАРТА АТАК (С ГОРОДАМИ) ---
+const geoip = require('geoip-lite');
+
+app.get('/api/analytics/geomap', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT s.ip_address, s.source_name, i.threat_level, i.name as incident_name
+            FROM incident_sources s
+            JOIN incident_source_links isl ON s.id = isl.source_id
+            JOIN incidents i ON isl.incident_id = i.id
+            WHERE s.ip_address IS NOT NULL AND s.ip_address != ''
+        `);
+
+        const markers = result.rows.map(row => {
+            const geo = geoip.lookup(row.ip_address);
+            if (geo) {
+                return {
+                    ip: row.ip_address,
+                    name: row.source_name,
+                    incident: row.incident_name,
+                    threat: row.threat_level,
+                    country: geo.country, // Код страны
+                    city: geo.city || 'Неизвестный город', // ДОБАВИЛИ ГОРОД
+                    coordinates: [geo.ll[1], geo.ll[0]]
+                };
+            }
+            return null;
+        }).filter(m => m !== null);
+
+        res.json(markers);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -418,6 +471,8 @@ app.post('/api/attacks', authenticateToken, authenticateAdmin, async (req, res) 
         }
         
         await client.query('COMMIT');
+        await updateAuditLogUser('incidents', newIncidentId, req.user.username);
+
         console.log(`Инцидент "${name}" создан пользователем ${req.user.username}`);
         res.status(201).json(incidentResult.rows[0]);
     } catch (err) {
@@ -483,6 +538,8 @@ app.put('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req, re
         }
         
         await client.query('COMMIT');
+        await updateAuditLogUser('incidents', req.params.id, req.user.username);
+
         console.log(`Инцидент с id ${req.params.id} обновлён пользователем ${req.user.username}`);
         res.json(result.rows[0]);
     } catch (err) {
@@ -514,6 +571,9 @@ app.delete('/api/attacks/:id', authenticateToken, authenticateAdmin, async (req,
         }
         
         await pool.query('DELETE FROM incidents WHERE id = $1', [req.params.id]);
+        
+        await updateAuditLogUser('incidents', req.params.id, req.user.username);
+
         console.log(`Инцидент с id ${req.params.id} удалён пользователем ${req.user.username}`);
         res.status(204).send();
     } catch (err) {
@@ -936,6 +996,62 @@ app.get('/api/attacks/:id/vulnerabilities', authenticateToken, async (req, res) 
     } catch (err) { 
         console.error(`Ошибка получения уязвимостей для инцидента ${req.params.id}:`, err.message);
         res.status(500).json({ error: err.message }); 
+    }
+});
+// --- АНАЛИТИКА: ГРАФ СВЯЗЕЙ ИНЦИДЕНТА ---
+app.get('/api/attacks/:id/graph', authenticateToken, async (req, res) => {
+    const incidentId = req.params.id;
+    try {
+        const nodes = [];
+        const links = [];
+
+        // 1. Центральный узел (Сам инцидент) - Красный
+        const inc = await pool.query('SELECT name FROM incidents WHERE id = $1', [incidentId]);
+        if (inc.rows.length === 0) return res.status(404).json({error: 'Not found'});
+        nodes.push({ id: `inc_${incidentId}`, name: inc.rows[0].name, group: 'incident', color: '#f85149', val: 25 });
+
+        // 2. Уязвимости - Желтые
+        const vulns = await pool.query(`
+            SELECT v.id, v.vulnerability_type FROM vulnerabilities v
+            JOIN incident_vulnerability_links ivl ON v.id = ivl.vulnerability_id
+            WHERE ivl.incident_id = $1`, [incidentId]);
+        vulns.rows.forEach(v => {
+            nodes.push({ id: `vuln_${v.id}`, name: v.vulnerability_type, group: 'vulnerability', color: '#d29922', val: 15 });
+            links.push({ source: `inc_${incidentId}`, target: `vuln_${v.id}`, label: 'Эксплуатирует' });
+        });
+
+        // 3. Источники атак - Синие
+        const sources = await pool.query(`
+            SELECT s.id, s.source_name, s.ip_address FROM incident_sources s
+            JOIN incident_source_links isl ON s.id = isl.source_id
+            WHERE isl.incident_id = $1`, [incidentId]);
+        sources.rows.forEach(s => {
+            nodes.push({ id: `src_${s.id}`, name: s.source_name + (s.ip_address ? `\n(${s.ip_address})` : ''), group: 'source', color: '#8ab4f8', val: 15 });
+            links.push({ source: `src_${s.id}`, target: `inc_${incidentId}`, label: 'Исходит от' });
+        });
+
+        // 4. Меры реагирования - Зеленые (и Сотрудники - Фиолетовые)
+        const measures = await pool.query(`
+            SELECT m.id, m.measure_name, e.full_name as employee_name FROM response_measures m
+            LEFT JOIN employees e ON m.employee_id = e.id
+            WHERE m.incident_id = $1`, [incidentId]);
+        measures.rows.forEach(m => {
+            nodes.push({ id: `meas_${m.id}`, name: m.measure_name, group: 'measure', color: '#3fb950', val: 15 });
+            links.push({ source: `inc_${incidentId}`, target: `meas_${m.id}`, label: 'Устраняется мерой' });
+            
+            // Если меру применил сотрудник, добавим и его на граф!
+            if (m.employee_name) {
+                const empId = `emp_${m.employee_name}`;
+                if (!nodes.find(n => n.id === empId)) {
+                    nodes.push({ id: empId, name: m.employee_name, group: 'employee', color: '#6f42c1', val: 10 });
+                }
+                links.push({ source: `meas_${m.id}`, target: empId, label: 'Исполнитель' });
+            }
+        });
+
+        res.json({ nodes, links });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

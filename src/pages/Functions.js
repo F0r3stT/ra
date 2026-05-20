@@ -70,7 +70,7 @@ const formatTime = (hoursDecimal) => {
 
   return (
     <div className="page">
-      <h2>Пользовательские функции</h2>
+      <h2>Функции</h2>
       {error && <div className="error">{error}<button onClick={() => setError('')} className="close">×</button></div>}
       
       <div className="stats" style={{ marginBottom: '30px' }}>

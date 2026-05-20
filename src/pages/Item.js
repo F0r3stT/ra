@@ -3,12 +3,15 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
+import ForceGraph2D from 'react-force-graph-2d';
 import ErrorBlock from '../components/ErrorBlock';
 import axios from 'axios';
 
 function Item() {
   const { id } = useParams();
+  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const nav = useNavigate();
+  const [selectedNode, setSelectedNode] = useState(null);
   const { current, loading, err, loadOne, clearErr } = useApp();
   const { user } = useAuth();
   const [notFound, setNotFound] = useState(false);
@@ -40,6 +43,13 @@ function Item() {
       axios.get(`/api/attacks/${current.id}/sources`)
         .then(res => setRelatedSources(res.data))
         .catch(err => console.error('Ошибка загрузки источников', err));
+      
+      // Загрузка данных для графа
+      axios.get(`/api/attacks/${current.id}/graph`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => setGraphData(res.data))
+      .catch(err => console.error('Ошибка загрузки графа', err));
     }
   }, [current]);
 
@@ -137,6 +147,114 @@ function Item() {
                 {s.ip_address && <span> (IP: {s.ip_address})</span>}
               </div>
             ))}
+          </div>
+        )}
+
+        {graphData.nodes.length > 1 && (
+          <div className="desc-block" style={{ position: 'relative' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              Интерактивная карта атаки
+            </h3>
+            <p style={{ color: '#8b949e', fontSize: '13px', marginBottom: '15px' }}>
+               Нажмите на любой узел, чтобы просмотреть подробную информацию о нём.
+            </p>
+            
+            <div style={{ 
+              position: 'relative', height: '500px', borderRadius: '16px', overflow: 'hidden', 
+              border: '1px solid #1f2937', 
+              background: 'radial-gradient(circle at center, #0d1117 0%, #010409 100%)', 
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)' 
+            }}>
+              
+              {/* Информационная панель (Стиль Glassmorphism) */}
+              {selectedNode && (
+                <div style={{ 
+                  position: 'absolute', top: '20px', right: '20px', zIndex: 10, 
+                  background: 'rgba(22, 27, 34, 0.6)', backdropFilter: 'blur(16px)', 
+                  padding: '24px', borderRadius: '16px', border: `1px solid rgba(255,255,255,0.05)`, 
+                  borderTop: `4px solid ${selectedNode.color}`, color: '#fff', width: '280px', 
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)', transition: 'all 0.3s ease' 
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', color: selectedNode.color }}>
+                      {selectedNode.group === 'incident' ? 'Инцидент' : 
+                       selectedNode.group === 'vulnerability' ? 'Уязвимость' : 
+                       selectedNode.group === 'source' ? 'Источник' : 'Мера реагирования'}
+                    </span>
+                    <button onClick={() => setSelectedNode(null)} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '16px' }}>
+                      ✕
+                    </button>
+                  </div>
+                  
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '18px', fontWeight: '600', lineHeight: '1.4' }}>
+                    {selectedNode.name.split('\n')[0]}
+                  </h4>
+
+                  {selectedNode.name.includes('\n') && (
+                    <p style={{ margin: 0, color: '#8ab4f8', fontSize: '14px', fontFamily: 'monospace', background: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: '6px', display: 'inline-block' }}>
+                      {selectedNode.name.split('\n')[1].replace(/[()]/g, '')}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <ForceGraph2D
+                graphData={graphData}
+                width={800}
+                height={500}
+                backgroundColor="rgba(0,0,0,0)" 
+                nodeRelSize={8}
+                
+                linkDirectionalParticles={4}
+                linkDirectionalParticleWidth={2}
+                linkDirectionalParticleSpeed={0.008}
+                linkDirectionalParticleColor={() => 'rgba(74, 222, 128, 0.8)'}
+                linkColor={() => 'rgba(255, 255, 255, 0.05)'}
+                
+                onNodeClick={(node) => setSelectedNode(node)}
+                onNodeDragEnd={node => {
+                  node.fx = node.x;
+                  node.fy = node.y; 
+                }}
+                
+                nodeCanvasObject={(node, ctx, globalScale) => {
+                  const label = node.name.split('\n')[0];
+                  const size = node.val / 2.5;
+                  
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, size * 2.2, 0, 2 * Math.PI, false);
+                  ctx.fillStyle = `${node.color}15`; 
+                  ctx.fill();
+
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, size * 1.4, 0, 2 * Math.PI, false);
+                  ctx.fillStyle = `${node.color}30`; 
+                  ctx.fill();
+
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
+                  ctx.fillStyle = node.color;
+                  ctx.fill();
+
+                  const fontSize = 12 / globalScale;
+                  ctx.font = `600 ${fontSize}px "Segoe UI", sans-serif`;
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  
+                  const textWidth = ctx.measureText(label).width;
+                  const bgHeight = fontSize + 8 / globalScale;
+                  ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
+                  ctx.fillRect(node.x - textWidth/2 - 6/globalScale, node.y + size + 6/globalScale, textWidth + 12/globalScale, bgHeight);
+                  
+                  ctx.lineWidth = 0.5 / globalScale;
+                  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                  ctx.strokeRect(node.x - textWidth/2 - 6/globalScale, node.y + size + 6/globalScale, textWidth + 12/globalScale, bgHeight);
+                  
+                  ctx.fillStyle = '#e6edf3';
+                  ctx.fillText(label, node.x, node.y + size + bgHeight/2 + 6/globalScale);
+                }}
+              />
+            </div>
           </div>
         )}
 

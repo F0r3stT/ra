@@ -1,6 +1,3 @@
-
-\restrict d8izngNnlL5vojKA637DFf5onkvqyAZFfxZN0h53fUwIOP34MZ793zPWrQijUvv
-
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -1092,6 +1089,4 @@ ALTER TABLE ONLY public.response_measures
 --
 -- PostgreSQL database dump complete
 --
-
-\unrestrict d8izngNnlL5vojKA637DFf5onkvqyAZFfxZN0h53fUwIOP34MZ793zPWrQijUvv
 

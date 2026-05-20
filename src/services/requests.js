@@ -1,4 +1,4 @@
-const API_URL = 'http://138.124.29.231:5000/api';
+const API_URL = 'http://localhost:5000/api';
 let unauthorizedHandler = null;
 
 export function setUnauthorizedHandler(handler) {
